@@ -1,50 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-async function callOpenRouter(messages: any[], maxTokens = 600) {
-  const models = [
-    'google/gemma-4-26b-a4b-it:free',
-    'google/gemma-4-31b-it:free',
-    'nvidia/nemotron-3.5-lightning:free',
-  ];
+async function callGemini(prompt: string) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-  for (const model of models) {
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://ai-agent-7ifv.onrender.com',
-          'X-Title': 'Marketing AI Agent',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: 0.7,
-          max_tokens: maxTokens,
-        }),
-      });
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 800,
+      },
+    }),
+  });
 
-      const data = await response.json();
+  const data = await response.json();
 
-      if (response.ok && data.choices?.[0]?.message?.content) {
-        return data.choices[0].message.content;
-      }
-      console.log(`Model ${model} failed:`, data.error?.message || data);
-    } catch (e) {
-      console.log(`Model ${model} error:`, e);
-    }
+  if (!response.ok) {
+    throw new Error(data.error?.message || 'Gemini API error');
   }
-  throw new Error('All free models failed. Try again later.');
+
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { analysis } = await req.json();
 
-    const systemPrompt = `তুমি একজন প্রফেশনাল সোশ্যাল মিডিয়া মার্কেটিং এক্সপার্ট। 
+    const prompt = `তুমি একজন প্রফেশনাল সোশ্যাল মিডিয়া মার্কেটিং এক্সপার্ট। 
 নিচের বিশ্লেষণের উপর ভিত্তি করে ৩টি আলাদা সোশ্যাল মিডিয়া পোস্ট তৈরি করো।
 
 প্রতিটি পোস্টে থাকবে:
@@ -59,23 +45,21 @@ export async function POST(req: NextRequest) {
     {"content": "...", "hashtags": "#tag1 #tag2"}
   ]
 }
-অন্য কোনো টেক্সট দেবে না।`;
+অন্য কোনো টেক্সট দেবে না।
 
-    const userContent = typeof analysis === 'string' ? analysis.slice(0, 1800) : JSON.stringify(analysis).slice(0, 1800);
+বিশ্লেষণ:
+${typeof analysis === 'string' ? analysis.slice(0, 2500) : JSON.stringify(analysis).slice(0, 2500)}`;
 
-    const content = await callOpenRouter([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userContent },
-    ], 700);
+    const text = await callGemini(prompt);
 
     let posts = [];
     try {
-      const cleaned = content.replace(/```json|```/g, '').trim();
+      const cleaned = text.replace(/```json|```/g, '').trim();
       const parsed = JSON.parse(cleaned);
       posts = parsed.posts || [];
     } catch {
       posts = [
-        { content: content.slice(0, 300) || 'পোস্ট তৈরি হয়েছে।', hashtags: '#marketing #ai' }
+        { content: text.slice(0, 400) || 'পোস্ট তৈরি হয়েছে।', hashtags: '#marketing #ai' }
       ];
     }
 
